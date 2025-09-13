@@ -121,11 +121,10 @@
         if (CONFIG.lensId){
           let lens;
           try {
-            if (CONFIG.groupId) {
-              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId));
-            } else {
-              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId));
-            }
+            const resp = CONFIG.groupId
+              ? await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId)
+              : await cameraKitRef.lensRepository.loadLens(CONFIG.lensId);
+            const lens = resp?.lens; // safe access in case resp is undefined
           } catch (e) {
             console.error('[CameraKit] loadLens failed:', e);
           }
