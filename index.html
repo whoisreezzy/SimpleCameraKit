@@ -49,6 +49,7 @@
     let cameraKitRef = null;
     let mediaRef = null;
     let lastPixelW = 0, lastPixelH = 0;
+    let __ckReady = false;
 
     function resize(){
       // Не трогаем canvas.width/height после OffscreenCanvas передачи
@@ -61,6 +62,7 @@
     // Безопасно обновляем рендер‑размер после изменения viewport
     let __resizeTimer = null;
     async function updateRenderSize(){
+      if (!__ckReady) return; // ещё не инициализировано — тихо выходим
       const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
       const rect = canvas.getBoundingClientRect();
       const pxW = Math.floor(rect.width * dpr);
@@ -93,6 +95,7 @@
     queueRenderResize();
 
     async function rebuildSession(pxW, pxH){
+      if (!cameraKitRef) { console.warn('[CameraKit] rebuildSession called before bootstrap — skipped'); return; }
       // Освобождаем старую сессию (но не трогаем media stream)
       try { if (sessionRef) { await sessionRef.pause(); await sessionRef.destroy(); } } catch(_){ }
 
@@ -135,6 +138,7 @@
         if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите VITE_CAMERA_KIT_TOKEN в переменных окружения (Netlify) или .env.local');
 
         cameraKitRef = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
+        __ckReady = true;
 
         mediaRef = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: CONFIG.facingMode }, audio: false
