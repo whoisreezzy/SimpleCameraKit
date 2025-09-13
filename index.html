@@ -47,8 +47,8 @@
     let __ckReady = false;
 
     function resize(){
-      // Без зеркалирования на канвасе
-      canvas.style.transform = 'none';
+      // Раззеркалить итоговый рендер (камера + линза)
+      canvas.style.transform = 'scaleX(-1)';
       canvas.style.transformOrigin = 'center';
     }
     // Безопасно обновляем рендер‑размер после изменения viewport
