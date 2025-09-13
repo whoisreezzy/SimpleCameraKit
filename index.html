@@ -36,6 +36,7 @@
     import {
       bootstrapCameraKit,
       createMediaStreamSource,
+      Transform2D,
     } from '@snap/camera-kit';
 
     const canvas = document.getElementById('c');
@@ -95,7 +96,10 @@
         });
 
         // Если линза рисуется зеркально, подадим зеркальный источник и раззеркалим превью CSS-ом.
-        const source = createMediaStreamSource(mediaRef, { mirror: true });
+        const source = createMediaStreamSource(mediaRef, {
+          transform: Transform2D.MirrorX,
+          cameraType: 'front'
+        });
         sourceRef = source;
 
         // Первая и единственная передача управления OffscreenCanvas: задаём bitmap‑размер ДО createSession
