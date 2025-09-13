@@ -33,7 +33,7 @@
       groupId:    (import.meta.env && import.meta.env.VITE_LENS_GROUP_ID) || undefined,
       facingMode: (import.meta.env && import.meta.env.VITE_FACING) || 'user',
       // Только визуальное отражение превью (CSS). Сам видеопоток и логику линзы НЕ зеркалим.
-      mirrorPreview: String((import.meta.env && import.meta.env.VITE_MIRROR) ?? 'true') === 'true'
+      mirrorPreview: String((import.meta.env && import.meta.env.VITE_MIRROR) ?? 'false') === 'true'
     };
 
     import {
