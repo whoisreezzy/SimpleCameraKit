@@ -47,8 +47,8 @@
     let __ckReady = false;
 
     function resize(){
-      // Раззеркалить итоговый рендер (камера + линза)
-      canvas.style.transform = 'scaleX(-1)';
+      // Без зеркала на канвасе — фильтр остаётся как есть
+      canvas.style.transform = 'none';
       canvas.style.transformOrigin = 'center';
     }
     // Безопасно обновляем рендер‑размер после изменения viewport
@@ -95,7 +95,7 @@
         });
 
         // Если линза рисуется зеркально, подадим зеркальный источник и раззеркалим превью CSS-ом.
-        const source = createMediaStreamSource(mediaRef, { mirror: false });
+        const source = createMediaStreamSource(mediaRef, { mirror: true });
         sourceRef = source;
 
         // Первая и единственная передача управления OffscreenCanvas: задаём bitmap‑размер ДО createSession
