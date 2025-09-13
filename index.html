@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Camera Kit — fullscreen</title>
+  <style>
+    /* 100% безопасное полноэкранное полотно с учётом мобильных браузеров */
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: #000; overflow: hidden;
+    }
+    /* Используем динамические viewport-единицы, чтобы не ломало из-за адресной строки */
+    #c {
+      position: fixed; inset: 0; display: block;
+      width: 100vw; height: 100dvh; /* fallback ниже */
+    }
+    @supports not (height: 100dvh) {
+      #c { height: 100vh; } 
+    }
+    /* На iOS учитываем вырезы экрана */
+    body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <script type="module">
+    const CONFIG = {
+      apiToken: '',      // вставьте API Token
+      lensId:   '',      // Lens ID
+      groupId:  '',      // опционально
+      facingMode: 'user',
+      mirror: true
+    };
+
+    import {
+      bootstrapCameraKit,
+      createMediaStreamSource,
+    } from 'https://cdn.jsdelivr.net/npm/@snap/camera-kit@latest/dist/camera-kit.min.js';
+
+    const canvas = document.getElementById('c');
+
+    function resize(){
+      // Канвас тянется на весь экран через CSS; выставляем реальный pixel size под DPR
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      const targetW = Math.floor(rect.width  * dpr);
+      const targetH = Math.floor(rect.height * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH){
+        canvas.width  = targetW;
+        canvas.height = targetH;
+      }
+      canvas.style.transform = CONFIG.mirror ? 'scaleX(-1)' : 'none';
+      canvas.style.transformOrigin = 'center';
+    }
+    // Обновляем размер при ресайзе окна, смене ориентации и изменении визуального viewport (iOS)
+    window.addEventListener('resize', resize, { passive:true });
+    window.addEventListener('orientationchange', ()=> setTimeout(resize, 50), { passive:true });
+    if (window.visualViewport){
+      window.visualViewport.addEventListener('resize', ()=> setTimeout(resize, 50), { passive:true });
+    }
+    resize();
+    resize();
+
+    (async()=>{
+      try{
+        if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите его в CONFIG.apiToken');
+
+        const cameraKit = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
+        const session = await cameraKit.createSession();
+        session.setRenderTarget(canvas);
+
+        const media = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: CONFIG.facingMode }, audio: false
+        });
+
+        const source = createMediaStreamSource(media, { mirror: CONFIG.mirror });
+        await session.setSource(source);
+
+        if (CONFIG.lensId){
+          const { lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId || undefined);
+          await session.applyLens(lens);
+        }
+
+        await session.play();
+
+        window.addEventListener('beforeunload', ()=>{
+          try { session.pause(); session.destroy(); } catch(_){}
+          try { media.getTracks().forEach(t=>t.stop()); } catch(_){}
+        });
+      }catch(err){
+        console.error('[CameraKit]', err);
+      }
+    })();
+  </script>
+</body>
+</html>
