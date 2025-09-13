@@ -9,7 +9,7 @@
     "preview": "vite preview --open"
   },
   "dependencies": {
-    "@snap/camera-kit": "^1.18.0"
+    "@snap/camera-kit": "^1.9.0"
   },
   "devDependencies": {
     "typescript": "^5.6.2",
