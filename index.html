@@ -114,16 +114,51 @@
         await sessionRef.setSource(sourceRef);
         try { await sourceRef.setRenderSize(lastPixelW, lastPixelH); } catch(_){}
 
-        // ---- Load/apply lens (minimal) ----
-        if (CONFIG.lensId) {
+        // ---- Load/apply lens with robust diagnostics ----
+        let applied = false;
+
+        // 1) Try by explicit lensId (with/without groupId)
+        if (CONFIG.lensId){
+          let lens;
           try {
-            const { lens } = CONFIG.groupId
-              ? await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId)
-              : await cameraKitRef.lensRepository.loadLens(CONFIG.lensId);
-            await sessionRef.applyLens(lens);
-          } catch (_) {
-            // тихо пропускаем, если линза недоступна
+            if (CONFIG.groupId) {
+              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId));
+            } else {
+              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId));
+            }
+          } catch (e) {
+            console.error('[CameraKit] loadLens failed:', e);
           }
+
+          if (lens) {
+            await sessionRef.applyLens(lens);
+            applied = true;
+            console.log('[CameraKit] Applied lens by ID:', CONFIG.lensId);
+          } else {
+            console.warn('[CameraKit] Lens not found via loadLens(). Will try group fallback (if provided).');
+          }
+        }
+
+        // 2) Fallback: if a groupId is provided, try to fetch lenses from that group and apply the first one
+        if (!applied && CONFIG.groupId) {
+          try {
+            const { lenses, errors } = await cameraKitRef.lensRepository.loadLensGroups([CONFIG.groupId]);
+            if (errors && errors.length) console.warn('[CameraKit] loadLensGroups errors:', errors);
+            console.log('[CameraKit] Lenses in group:', lenses?.map(l => ({ id: l.id, name: l.name })));
+            if (lenses && lenses.length) {
+              await sessionRef.applyLens(lenses[0]);
+              applied = true;
+              console.log('[CameraKit] Applied first lens from group:', lenses[0]?.id);
+            } else {
+              console.error('[CameraKit] No lenses returned for group. Check groupId/token/allowlist.');
+            }
+          } catch (e) {
+            console.error('[CameraKit] loadLensGroups failed:', e);
+          }
+        }
+
+        if (!applied) {
+          console.error('[CameraKit] Lens not found or not accessible. Check lensId/groupId/token/allowlist, and that the lens is added to the group for this App.');
         }
 
         await sessionRef.play();
