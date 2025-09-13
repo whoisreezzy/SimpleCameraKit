@@ -28,11 +28,11 @@
 
   <script type="module">
     const CONFIG = {
-      apiToken: 'eyJhbGciOiJIUzI1NiIsImtpZCI6IkNhbnZhc1MyU0hNQUNQcm9kIiwidHlwIjoiSldUIn0.eyJhdWQiOiJjYW52YXMtY2FudmFzYXBpIiwiaXNzIjoiY2FudmFzLXMyc3Rva2VuIiwibmJmIjoxNzU2ODM5OTA2LCJzdWIiOiI3MDQyOGYxNS0zMjRmLTQ4ODMtOWUxMy04MjBhNDNlM2JhYzl-U1RBR0lOR35lMzJiMjU5NS00NjUxLTRhMmEtYmJlMy01YjhmOTBhM2ViY2EifQ.AMxJfTB8gUECd3JLSgQ_4joc1O_wS1Nu2UcKEZhuGgw',      // вставьте API Token
-      lensId:   '511e1911-03b6-493b-be19-0b1ac92d0f3a',      // Lens ID
-      groupId:  'dc6d087b-4593-42a4-b8c7-0060e940b5e8',      // опционально
-      facingMode: 'user',
-      mirror: true
+      apiToken: (import.meta.env && import.meta.env.VITE_CAMERA_KIT_TOKEN) || '',
+      lensId:   (import.meta.env && import.meta.env.VITE_LENS_ID) || '',
+      groupId:  (import.meta.env && import.meta.env.VITE_LENS_GROUP_ID) || undefined,
+      facingMode: (import.meta.env && import.meta.env.VITE_FACING) || 'user',
+      mirror: String((import.meta.env && import.meta.env.VITE_MIRROR) ?? 'true') === 'true'
     };
 
     import {
@@ -41,28 +41,36 @@
     } from '@snap/camera-kit';
 
     const canvas = document.getElementById('c');
+    let sourceRef = null;
 
     function resize(){
-      // Канвас тянется на весь экран через CSS; выставляем реальный pixel size под DPR
-      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-      const rect = canvas.getBoundingClientRect();
-      const targetW = Math.floor(rect.width  * dpr);
-      const targetH = Math.floor(rect.height * dpr);
-      if (canvas.width !== targetW || canvas.height !== targetH){
-        canvas.width  = targetW;
-        canvas.height = targetH;
-      }
+      // Не трогаем canvas.width/height после OffscreenCanvas передачи
+      // Пусть CSS растягивает полотно, а реальный рендер‑размер зададим через source.setRenderSize
       canvas.style.transform = CONFIG.mirror ? 'scaleX(-1)' : 'none';
       canvas.style.transformOrigin = 'center';
     }
+    // Безопасно обновляем рендер‑размер после изменения viewport
+    let __resizeTimer = null;
+    async function updateRenderSize(){
+      if (!sourceRef) return;
+      try{
+        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        const rect = canvas.getBoundingClientRect();
+        await sourceRef.setRenderSize(Math.floor(rect.width * dpr), Math.floor(rect.height * dpr));
+      }catch(e){ console.warn('[CameraKit] setRenderSize failed:', e); }
+    }
+    function queueRenderResize(){
+      clearTimeout(__resizeTimer);
+      __resizeTimer = setTimeout(updateRenderSize, 60);
+    }
     // Обновляем размер при ресайзе окна, смене ориентации и изменении визуального viewport (iOS)
-    window.addEventListener('resize', resize, { passive:true });
-    window.addEventListener('orientationchange', ()=> setTimeout(resize, 50), { passive:true });
+    window.addEventListener('resize', ()=>{ resize(); queueRenderResize(); }, { passive:true });
+    window.addEventListener('orientationchange', ()=>{ setTimeout(()=>{ resize(); queueRenderResize(); }, 50); }, { passive:true });
     if (window.visualViewport){
-      window.visualViewport.addEventListener('resize', ()=> setTimeout(resize, 50), { passive:true });
+      window.visualViewport.addEventListener('resize', ()=>{ setTimeout(()=>{ resize(); queueRenderResize(); }, 50); }, { passive:true });
     }
     resize();
-    resize();
+    queueRenderResize();
 
     (async()=>{
       try{
@@ -78,7 +86,9 @@
         });
 
         const source = createMediaStreamSource(media, { mirror: CONFIG.mirror });
+        sourceRef = source;
         await session.setSource(source);
+        await updateRenderSize();
 
         // ---- Load/apply lens with robust diagnostics ----
         let applied = false;
