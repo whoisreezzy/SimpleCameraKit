@@ -69,8 +69,9 @@
         if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите его в CONFIG.apiToken');
 
         const cameraKit = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
-        const session = await cameraKit.createSession();
-        session.setRenderTarget(canvas);
+        const session = await cameraKit.createSession({
+          liveRenderTarget: canvas,
+        });
 
         const media = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: CONFIG.facingMode }, audio: false
