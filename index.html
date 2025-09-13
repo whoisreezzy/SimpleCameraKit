@@ -68,18 +68,9 @@
       const pxW = Math.floor(rect.width * dpr);
       const pxH = Math.floor(rect.height * dpr);
 
-      // Если физический размер изменился — пересобираем сессию (иначе OffscreenCanvas даст искажение)
-      const sizeChanged = (pxW !== lastPixelW || pxH !== lastPixelH);
-      if (sizeChanged) {
-        lastPixelW = pxW; lastPixelH = pxH;
-        await rebuildSession(pxW, pxH);
-        return;
-      }
-
+      lastPixelW = pxW; lastPixelH = pxH;
       if (!sourceRef) return;
-      try{
-        await sourceRef.setRenderSize(pxW, pxH);
-      }catch(e){ console.warn('[CameraKit] setRenderSize failed:', e); }
+      try { await sourceRef.setRenderSize(pxW, pxH); } catch(e){ console.warn('[CameraKit] setRenderSize failed:', e); }
     }
     function queueRenderResize(){
       clearTimeout(__resizeTimer);
@@ -96,41 +87,8 @@
 
     async function rebuildSession(pxW, pxH){
       if (!cameraKitRef) { console.warn('[CameraKit] rebuildSession called before bootstrap — skipped'); return; }
-      // Освобождаем старую сессию (но не трогаем media stream)
-      try { if (sessionRef) { await sessionRef.pause(); await sessionRef.destroy(); } } catch(_){ }
-
-      // Важно: задать bitmap‑размер канваса ДО передачи в OffscreenCanvas
-      try {
-        canvas.width = pxW; // пиксели
-        canvas.height = pxH;
-      } catch(e){ console.warn('[CameraKit] cannot set canvas size (ignored):', e); }
-
-      // Создаём новую сессию и подключаем прежний source
-      const session = await cameraKitRef.createSession({ liveRenderTarget: canvas });
-      sessionRef = session;
-      if (sourceRef) {
-        await session.setSource(sourceRef);
-        try { await sourceRef.setRenderSize(pxW, pxH); } catch(_){ }
-      }
-
-      // Пере‑применяем линзу (если есть)
-      let applied = false;
-      if (CONFIG.lensId){
-        try {
-          const res = CONFIG.groupId
-            ? await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId)
-            : await cameraKitRef.lensRepository.loadLens(CONFIG.lensId);
-          if (res && res.lens) { await session.applyLens(res.lens); applied = true; }
-        } catch(e){ console.warn('[CameraKit] loadLens on rebuild failed:', e); }
-      }
-      if (!applied && CONFIG.groupId){
-        try {
-          const { lenses } = await cameraKitRef.lensRepository.loadLensGroups([CONFIG.groupId]);
-          if (lenses && lenses.length){ await session.applyLens(lenses[0]); }
-        } catch(e){ console.warn('[CameraKit] loadLensGroups on rebuild failed:', e); }
-      }
-
-      await session.play();
+      if (!sourceRef) return;
+      try { await sourceRef.setRenderSize(pxW, pxH); } catch(e){ console.warn('[CameraKit] setRenderSize failed:', e); }
     }
 
     (async()=>{
@@ -148,12 +106,17 @@
         const source = createMediaStreamSource(mediaRef, { mirror: !!CONFIG.fixLensMirror });
         sourceRef = source;
 
-        // Первая сборка с актуальным размером окна
+        // Первая и единственная передача управления OffscreenCanvas: задаём bitmap‑размер ДО createSession
         const dpr0 = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
         const r0 = canvas.getBoundingClientRect();
         lastPixelW = Math.floor(r0.width * dpr0);
         lastPixelH = Math.floor(r0.height * dpr0);
-        await rebuildSession(lastPixelW, lastPixelH);
+        try { canvas.width = lastPixelW; canvas.height = lastPixelH; } catch(_) { /* ignore */ }
+
+        // Создаём сессию ОДИН раз и больше не пересоздаём
+        sessionRef = await cameraKitRef.createSession({ liveRenderTarget: canvas });
+        await sessionRef.setSource(sourceRef);
+        try { await sourceRef.setRenderSize(lastPixelW, lastPixelH); } catch(_){}
 
         // ---- Load/apply lens with robust diagnostics ----
         let applied = false;
