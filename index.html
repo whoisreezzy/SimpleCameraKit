@@ -74,7 +74,7 @@
 
     (async()=>{
       try{
-        if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите его в CONFIG.apiToken');
+        if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите VITE_CAMERA_KIT_TOKEN в переменных окружения (Netlify) или .env.local');
 
         const cameraKit = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
         const session = await cameraKit.createSession({
