@@ -28,11 +28,12 @@
 
   <script type="module">
     const CONFIG = {
-      apiToken: (import.meta.env && import.meta.env.VITE_CAMERA_KIT_TOKEN) || '',
-      lensId:   (import.meta.env && import.meta.env.VITE_LENS_ID) || '',
-      groupId:  (import.meta.env && import.meta.env.VITE_LENS_GROUP_ID) || undefined,
+      apiToken:   (import.meta.env && import.meta.env.VITE_CAMERA_KIT_TOKEN) || '',
+      lensId:     (import.meta.env && import.meta.env.VITE_LENS_ID) || '',
+      groupId:    (import.meta.env && import.meta.env.VITE_LENS_GROUP_ID) || undefined,
       facingMode: (import.meta.env && import.meta.env.VITE_FACING) || 'user',
-      mirror: String((import.meta.env && import.meta.env.VITE_MIRROR) ?? 'true') === 'true'
+      // Только визуальное отражение превью (CSS). Сам видеопоток и логику линзы НЕ зеркалим.
+      mirrorPreview: String((import.meta.env && import.meta.env.VITE_MIRROR) ?? 'true') === 'true'
     };
 
     import {
@@ -42,21 +43,37 @@
 
     const canvas = document.getElementById('c');
     let sourceRef = null;
+    let sessionRef = null;
+    let cameraKitRef = null;
+    let mediaRef = null;
+    let lastPixelW = 0, lastPixelH = 0;
 
     function resize(){
       // Не трогаем canvas.width/height после OffscreenCanvas передачи
       // Пусть CSS растягивает полотно, а реальный рендер‑размер зададим через source.setRenderSize
-      canvas.style.transform = CONFIG.mirror ? 'scaleX(-1)' : 'none';
+      const needMirror = CONFIG.mirrorPreview && CONFIG.facingMode === 'user';
+      canvas.style.transform = needMirror ? 'scaleX(-1)' : 'none';
       canvas.style.transformOrigin = 'center';
     }
     // Безопасно обновляем рендер‑размер после изменения viewport
     let __resizeTimer = null;
     async function updateRenderSize(){
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      const pxW = Math.floor(rect.width * dpr);
+      const pxH = Math.floor(rect.height * dpr);
+
+      // Если физический размер изменился — пересобираем сессию (иначе OffscreenCanvas даст искажение)
+      const sizeChanged = (pxW !== lastPixelW || pxH !== lastPixelH);
+      if (sizeChanged) {
+        lastPixelW = pxW; lastPixelH = pxH;
+        await rebuildSession(pxW, pxH);
+        return;
+      }
+
       if (!sourceRef) return;
       try{
-        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-        const rect = canvas.getBoundingClientRect();
-        await sourceRef.setRenderSize(Math.floor(rect.width * dpr), Math.floor(rect.height * dpr));
+        await sourceRef.setRenderSize(pxW, pxH);
       }catch(e){ console.warn('[CameraKit] setRenderSize failed:', e); }
     }
     function queueRenderResize(){
@@ -72,23 +89,63 @@
     resize();
     queueRenderResize();
 
+    async function rebuildSession(pxW, pxH){
+      // Освобождаем старую сессию (но не трогаем media stream)
+      try { if (sessionRef) { await sessionRef.pause(); await sessionRef.destroy(); } } catch(_){ }
+
+      // Важно: задать bitmap‑размер канваса ДО передачи в OffscreenCanvas
+      try {
+        canvas.width = pxW; // пиксели
+        canvas.height = pxH;
+      } catch(e){ console.warn('[CameraKit] cannot set canvas size (ignored):', e); }
+
+      // Создаём новую сессию и подключаем прежний source
+      const session = await cameraKitRef.createSession({ liveRenderTarget: canvas });
+      sessionRef = session;
+      if (sourceRef) {
+        await session.setSource(sourceRef);
+        try { await sourceRef.setRenderSize(pxW, pxH); } catch(_){ }
+      }
+
+      // Пере‑применяем линзу (если есть)
+      let applied = false;
+      if (CONFIG.lensId){
+        try {
+          const res = CONFIG.groupId
+            ? await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId)
+            : await cameraKitRef.lensRepository.loadLens(CONFIG.lensId);
+          if (res && res.lens) { await session.applyLens(res.lens); applied = true; }
+        } catch(e){ console.warn('[CameraKit] loadLens on rebuild failed:', e); }
+      }
+      if (!applied && CONFIG.groupId){
+        try {
+          const { lenses } = await cameraKitRef.lensRepository.loadLensGroups([CONFIG.groupId]);
+          if (lenses && lenses.length){ await session.applyLens(lenses[0]); }
+        } catch(e){ console.warn('[CameraKit] loadLensGroups on rebuild failed:', e); }
+      }
+
+      await session.play();
+    }
+
     (async()=>{
       try{
         if(!CONFIG.apiToken) throw new Error('Нет API Token. Укажите VITE_CAMERA_KIT_TOKEN в переменных окружения (Netlify) или .env.local');
 
-        const cameraKit = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
-        const session = await cameraKit.createSession({
-          liveRenderTarget: canvas,
-        });
+        cameraKitRef = await bootstrapCameraKit({ apiToken: CONFIG.apiToken });
 
-        const media = await navigator.mediaDevices.getUserMedia({
+        mediaRef = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: CONFIG.facingMode }, audio: false
         });
 
-        const source = createMediaStreamSource(media, { mirror: CONFIG.mirror });
+        const source = createMediaStreamSource(mediaRef, { mirror: false });
         sourceRef = source;
-        await session.setSource(source);
-        await updateRenderSize();
+
+        // Первая сборка с актуальным размером окна
+        const dpr0 = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        const r0 = canvas.getBoundingClientRect();
+        lastPixelW = Math.floor(r0.width * dpr0);
+        lastPixelH = Math.floor(r0.height * dpr0);
+        await rebuildSession(lastPixelW, lastPixelH);
 
         // ---- Load/apply lens with robust diagnostics ----
         let applied = false;
@@ -98,16 +155,16 @@
           let lens;
           try {
             if (CONFIG.groupId) {
-              ({ lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId));
+              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId));
             } else {
-              ({ lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId));
+              ({ lens } = await cameraKitRef.lensRepository.loadLens(CONFIG.lensId));
             }
           } catch (e) {
             console.error('[CameraKit] loadLens failed:', e);
           }
 
           if (lens) {
-            await session.applyLens(lens);
+            await sessionRef.applyLens(lens);
             applied = true;
             console.log('[CameraKit] Applied lens by ID:', CONFIG.lensId);
           } else {
@@ -118,11 +175,11 @@
         // 2) Fallback: if a groupId is provided, try to fetch lenses from that group and apply the first one
         if (!applied && CONFIG.groupId) {
           try {
-            const { lenses, errors } = await cameraKit.lensRepository.loadLensGroups([CONFIG.groupId]);
+            const { lenses, errors } = await cameraKitRef.lensRepository.loadLensGroups([CONFIG.groupId]);
             if (errors && errors.length) console.warn('[CameraKit] loadLensGroups errors:', errors);
             console.log('[CameraKit] Lenses in group:', lenses?.map(l => ({ id: l.id, name: l.name })));
             if (lenses && lenses.length) {
-              await session.applyLens(lenses[0]);
+              await sessionRef.applyLens(lenses[0]);
               applied = true;
               console.log('[CameraKit] Applied first lens from group:', lenses[0]?.id);
             } else {
@@ -137,11 +194,11 @@
           console.error('[CameraKit] Lens not found or not accessible. Check lensId/groupId/token/allowlist, and that the lens is added to the group for this App.');
         }
 
-        await session.play();
+        await sessionRef.play();
 
         window.addEventListener('beforeunload', ()=>{
-          try { session.pause(); session.destroy(); } catch(_){}
-          try { media.getTracks().forEach(t=>t.stop()); } catch(_){}
+          try { if (sessionRef) { sessionRef.pause(); sessionRef.destroy(); } } catch(_){}
+          try { if (mediaRef) { mediaRef.getTracks().forEach(t=>t.stop()); } } catch(_){}
         });
       }catch(err){
         console.error('[CameraKit]', err);
