@@ -81,8 +81,22 @@
         await session.setSource(source);
 
         if (CONFIG.lensId){
-          const { lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId || undefined);
-          await session.applyLens(lens);
+          let lens;
+          try {
+            if (CONFIG.groupId) {
+              ({ lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId, CONFIG.groupId));
+            } else {
+              ({ lens } = await cameraKit.lensRepository.loadLens(CONFIG.lensId));
+            }
+          } catch (e) {
+            console.error('[CameraKit] loadLens failed:', e);
+          }
+
+          if (!lens) {
+            console.error('[CameraKit] Lens not found or not accessible. Check lensId/groupId/token/allowlist.');
+          } else {
+            await session.applyLens(lens);
+          }
         }
 
         await session.play();
